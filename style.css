@@ -1,0 +1,91 @@
+body {
+  margin: 0;
+  font-family: sans-serif;
+  background: #eef2f5;
+}
+
+.container {
+  padding: 1rem;
+  text-align: center;
+}
+
+h1 {
+  margin-bottom: 1rem;
+}
+
+#map {
+  height: 300px;
+  width: 100%;
+  margin-bottom: 1rem;
+  border: 2px solid #ccc;
+  border-radius: 0.5rem;
+}
+
+.controls {
+  margin-bottom: 1rem;
+}
+
+button,
+.import-label {
+  margin: 0.25rem;
+  padding: 0.7rem 1rem;
+  font-size: 1rem;
+  background: #0077cc;
+  color: white;
+  border: none;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+button:hover,
+.import-label:hover {
+  background: #005fa3;
+}
+
+.import-label {
+  display: inline-block;
+  background: #28a745;
+}
+
+.import-label input {
+  display: none;
+}
+
+.info {
+  font-size: 1.1rem;
+  margin-top: 1rem;
+}
+
+#gps-status {
+  position: fixed;
+  bottom: 1rem;
+  left: 1rem;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.95rem;
+  z-index: 9999;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+#timer {
+  margin-top: 0.5rem;
+  font-weight: bold;
+  color: #333;
+}
+
+.start-icon {
+  font-size: 20px;
+  color: green;
+}
+.finish-icon {
+  font-size: 20px;
+  color: red;
+}
+
+.weather-icon {
+  font-size: 20px;
+  text-align: center;
+  line-height: 20px;
+}
