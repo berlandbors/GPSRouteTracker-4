@@ -2,7 +2,6 @@ let map;
 let segments = [];
 let currentSegment = [];
 let routeLines = [];
-let weatherMarkers = [];
 let liveMarker = null;
 let startMarker = null;
 let finishMarker = null;
@@ -20,6 +19,7 @@ window.onload = () => {
     attribution: '&copy; OpenStreetMap contributors',
     maxZoom: 19,
   }).addTo(map);
+
   checkGPSAccess();
   loadSavedRoute();
 };
@@ -69,12 +69,11 @@ function startTracking() {
       status.textContent = `⚠️ Точность плохая (${accuracy.toFixed(1)} м), ждём...`;
       return;
     }
-    status.remove();
 
+    status.remove();
     const coords = smoothCoords(latitude, longitude);
     const now = new Date();
-    const motion = speed == null ? "unknown" : (speed < 2 ? "walk" : "vehicle");
-    const weather = await getPointWeather(coords.lat, coords.lon);
+    const weather = await fetchWeather(coords.lat, coords.lon);
 
     const point = {
       lat: coords.lat,
@@ -82,9 +81,8 @@ function startTracking() {
       alt: altitude ?? null,
       time: now.toTimeString().split(' ')[0],
       speed: speed ?? null,
-      motion,
-      temperature: weather?.temperature ?? null,
-      weatherCode: weather?.weathercode ?? null
+      motion: speed == null ? "unknown" : (speed < 2 ? "walk" : "vehicle"),
+      weather: weather || {}
     };
 
     if (currentSegment.length === 0) {
@@ -99,16 +97,15 @@ function startTracking() {
 
     updateLiveMarker(coords, point);
     map.panTo([coords.lat, coords.lon]);
-    updateMotionDisplay(motion);
-    document.getElementById("currentAlt").textContent =
-      point.alt !== null ? `Высота: ${Math.round(point.alt)} м` : "Высота: —";
+    updateMotionDisplay(point.motion);
+    document.getElementById("currentAlt").textContent = point.alt !== null ? `Высота: ${Math.round(point.alt)} м` : "Высота: —";
   }, err => {
     status.remove();
     alert("Ошибка GPS: " + err.message);
   }, {
     enableHighAccuracy: true,
     maximumAge: 0,
-    timeout: 30000
+    timeout: 10000
   });
 }
 
@@ -119,27 +116,22 @@ function stopTracking() {
   }
 }
 
-async function getPointWeather(lat, lon) {
-  try {
-    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`);
-    const data = await res.json();
-    return data.current_weather;
-  } catch (e) {
-    console.warn("Погода не получена:", e);
-    return null;
-  }
-}
-
 function updateLiveMarker(coords, point) {
   const latlng = [coords.lat, coords.lon];
+  const windDir = point.weather?.wind_direction ?? null;
+  const windIcon = windDir ? getWindArrow(windDir) : "❓";
+  const windText = windDir ? `${windDir}°` : "—";
+  const speedMpm = point.speed ? (point.speed * 60).toFixed(1) : "—";
+
   const popupText = `
     📍 Вы здесь<br>
-    ⏱ ${point.time}<br>
-    🏔 ${point.alt !== null ? Math.round(point.alt) + ' м' : '—'}<br>
-    📏 ${point.speed !== null ? (point.speed * 3.6).toFixed(1) + ' км/ч' : '—'}<br>
-    🌡️ ${point.temperature !== null ? point.temperature + '°C' : '—'}<br>
-    🌤 ${weatherIconFromCode(point.weatherCode)}
+    🕒 Время: ${point.time}<br>
+    🏔️ Высота: ${point.alt !== null ? Math.round(point.alt) + " м" : "—"}<br>
+    🏃 Скорость: ${speedMpm} м/мин<br>
+    🌡 Темп: ${point.weather?.temperature ?? "—"}°C<br>
+    🌬 Ветер: ${windIcon} ${windText}
   `;
+
   if (!liveMarker) {
     liveMarker = L.circleMarker(latlng, {
       radius: 8,
@@ -150,6 +142,28 @@ function updateLiveMarker(coords, point) {
   } else {
     liveMarker.setLatLng(latlng).setPopupContent(popupText);
   }
+}
+
+function getWindArrow(deg) {
+  const dirs = ["🡡", "🡥", "🡢", "🡦", "🡣", "🡧", "🡠", "🡤"];
+  const index = Math.round(deg / 45) % 8;
+  return dirs[index];
+}
+
+function fetchWeather(lat, lon) {
+  return fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`)
+    .then(res => res.json())
+    .then(data => {
+      const w = data.current_weather;
+      return {
+        temperature: w.temperature,
+        wind_speed: w.windspeed,
+        wind_direction: w.winddirection
+      };
+    }).catch(err => {
+      console.warn("Погода не получена", err);
+      return null;
+    });
 }
 
 function updateMotionDisplay(motion) {
@@ -184,45 +198,15 @@ function shouldAddPoint(coords) {
 function updateMap() {
   routeLines.forEach(line => map.removeLayer(line));
   routeLines = [];
-  weatherMarkers.forEach(m => map.removeLayer(m));
-  weatherMarkers = [];
-
   segments.forEach((segment, i) => {
     const latlngs = segment.map(p => [p.lat, p.lon]);
     const color = `hsl(${i * 60 % 360}, 80%, 50%)`;
     const poly = L.polyline(latlngs, { color }).addTo(map);
     routeLines.push(poly);
   });
-
   const totalPoints = segments.reduce((sum, s) => sum + s.length, 0);
   document.getElementById("pointsCount").textContent = `Точек: ${totalPoints}`;
   document.getElementById("distance").textContent = `Дистанция: ${totalDistance().toFixed(2)} км`;
-
-  addWeatherIcons();
-}
-
-function addWeatherIcons() {
-  segments.forEach(segment => {
-    segment.forEach(p => {
-      if (p.weatherCode !== null && Math.random() < 0.1) {
-        const icon = weatherIconFromCode(p.weatherCode);
-        const marker = L.marker([p.lat, p.lon], {
-          icon: L.divIcon({ className: 'weather-icon', html: icon, iconSize: [20, 20] })
-        });
-        marker.addTo(map);
-        weatherMarkers.push(marker);
-      }
-    });
-  });
-}
-
-function weatherIconFromCode(code) {
-  if (code === null) return "❓";
-  if (code < 3) return "☀️";
-  if (code < 45) return "⛅";
-  if (code < 61) return "🌧";
-  if (code < 80) return "❄️";
-  return "🌫";
 }
 
 function markStart(coords) {
@@ -270,54 +254,12 @@ function totalDistance() {
   return dist;
 }
 
-function saveRoute() {
-  const now = new Date();
-  const duration = startTime ? {
-    formatted: `${String(new Date(now - startTime).getUTCHours()).padStart(2, '0')}:${String(new Date(now - startTime).getUTCMinutes()).padStart(2, '0')}:${String(new Date(now - startTime).getUTCSeconds()).padStart(2, '0')}`
-  } : null;
-
-  const data = {
-    name: `Маршрут от ${now.toLocaleString()}`,
-    distance: totalDistance(),
-    duration,
-    segments
-  };
-
-  localStorage.setItem("lastRoute", JSON.stringify(data));
-  alert("✅ Маршрут сохранён!");
-}
-
-function loadSavedRoute() {
-  const data = localStorage.getItem("lastRoute");
-  if (!data) return;
-
-  try {
-    const parsed = JSON.parse(data);
-    segments = parsed.segments || [];
-    updateMap();
-    if (segments.length > 0 && segments[0].length > 0) {
-      markStart(segments[0][0]);
-      const lastSeg = segments[segments.length - 1];
-      if (lastSeg.length > 0) markFinish(lastSeg[lastSeg.length - 1]);
-    }
-    if (parsed.duration?.formatted) {
-      document.getElementById("timer").textContent = `Время движения: ${parsed.duration.formatted}`;
-    }
-  } catch (e) {
-    console.warn("❌ Ошибка загрузки маршрута:", e);
-  }
-}
-
 function exportRoute() {
-  if (segments.length === 0) return alert("⚠️ Маршрут пуст.");
-
-  const now = new Date();
   const data = {
-    name: `Маршрут от ${now.toLocaleString()}`,
+    name: `Маршрут от ${new Date().toLocaleString()}`,
     distance: totalDistance(),
-    segments
+    segments: segments
   };
-
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -335,16 +277,36 @@ function importRoute() {
       const data = JSON.parse(e.target.result);
       segments = data.segments || [];
       updateMap();
-      if (segments.length > 0 && segments[0].length > 0) {
+      if (segments.length && segments[0].length) {
         markStart(segments[0][0]);
-        const lastSeg = segments[segments.length - 1];
-        if (lastSeg.length > 0) markFinish(lastSeg[lastSeg.length - 1]);
+        markFinish();
       }
     } catch (err) {
-      alert("❌ Ошибка чтения JSON.");
+      alert("Ошибка чтения JSON.");
     }
   };
   reader.readAsText(file);
+}
+
+function clearRoute() {
+  stopTracking();
+  stopTimer();
+  segments = [];
+  currentSegment = [];
+  routeLines.forEach(l => map.removeLayer(l));
+  routeLines = [];
+  if (liveMarker) map.removeLayer(liveMarker);
+  if (startMarker) map.removeLayer(startMarker);
+  if (finishMarker) map.removeLayer(finishMarker);
+  liveMarker = null;
+  startMarker = null;
+  finishMarker = null;
+
+  document.getElementById("distance").textContent = "Дистанция: —";
+  document.getElementById("pointsCount").textContent = "Точек: 0";
+  document.getElementById("timer").textContent = "Время движения: 00:00:00";
+  document.getElementById("motionType").textContent = "Режим: ❓";
+  document.getElementById("currentAlt").textContent = "Высота: —";
 }
 
 function createStatusElement(text) {
@@ -353,4 +315,4 @@ function createStatusElement(text) {
   div.textContent = text;
   document.body.appendChild(div);
   return div;
-    }
+}
