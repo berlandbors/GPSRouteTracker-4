@@ -69,10 +69,10 @@ function startTracking() {
       status.textContent = `⚠️ Точность плохая (${accuracy.toFixed(1)} м), ждём...`;
       return;
     }
-
     status.remove();
     const coords = smoothCoords(latitude, longitude);
     const now = new Date();
+
     const weather = await fetchWeather(coords.lat, coords.lon);
 
     const point = {
@@ -118,9 +118,9 @@ function stopTracking() {
 
 function updateLiveMarker(coords, point) {
   const latlng = [coords.lat, coords.lon];
-  const windDir = point.weather?.wind_direction ?? null;
+  const windDir = point.weather?.wind_direction;
   const windIcon = windDir ? getWindArrow(windDir) : "❓";
-  const windText = windDir ? `${windDir}°` : "—";
+  const windText = windDir ? getCompassDirection(windDir) : "—";
   const speedMpm = point.speed ? (point.speed * 60).toFixed(1) : "—";
 
   const popupText = `
@@ -142,28 +142,6 @@ function updateLiveMarker(coords, point) {
   } else {
     liveMarker.setLatLng(latlng).setPopupContent(popupText);
   }
-}
-
-function getWindArrow(deg) {
-  const dirs = ["🡡", "🡥", "🡢", "🡦", "🡣", "🡧", "🡠", "🡤"];
-  const index = Math.round(deg / 45) % 8;
-  return dirs[index];
-}
-
-function fetchWeather(lat, lon) {
-  return fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`)
-    .then(res => res.json())
-    .then(data => {
-      const w = data.current_weather;
-      return {
-        temperature: w.temperature,
-        wind_speed: w.windspeed,
-        wind_direction: w.winddirection
-      };
-    }).catch(err => {
-      console.warn("Погода не получена", err);
-      return null;
-    });
 }
 
 function updateMotionDisplay(motion) {
@@ -254,11 +232,70 @@ function totalDistance() {
   return dist;
 }
 
-function exportRoute() {
+async function fetchWeather(lat, lon) {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const weather = data.current_weather;
+    return {
+      temperature: weather.temperature,
+      wind_speed: weather.windspeed,
+      wind_direction: weather.winddirection
+    };
+  } catch (err) {
+    console.warn("Погода не получена", err);
+    return null;
+  }
+}
+
+function getWindArrow(deg) {
+  const dirs = ["🡡", "🡥", "🡢", "🡦", "🡣", "🡧", "🡠", "🡤"];
+  const index = Math.round(deg / 45) % 8;
+  return dirs[index];
+}
+
+function getCompassDirection(deg) {
+  const dirs = ["С", "С-В", "В", "Ю-В", "Ю", "Ю-З", "З", "С-З"];
+  const index = Math.round(deg / 45) % 8;
+  return dirs[index];
+}
+
+function saveRoute() {
+  const allPoints = segments.flat();
   const data = {
     name: `Маршрут от ${new Date().toLocaleString()}`,
     distance: totalDistance(),
-    segments: segments
+    segments
+  };
+  localStorage.setItem("lastRoute", JSON.stringify(data));
+  alert("Маршрут сохранён!");
+}
+
+function loadSavedRoute() {
+  const data = localStorage.getItem("lastRoute");
+  if (!data) return;
+
+  try {
+    const parsed = JSON.parse(data);
+    segments = parsed.segments || [];
+    updateMap();
+    if (segments.length > 0 && segments[0].length > 0) {
+      markStart(segments[0][0]);
+      const last = segments.flat().slice(-1)[0];
+      markFinish({ lat: last.lat, lon: last.lon });
+    }
+  } catch (e) {
+    console.warn("Ошибка загрузки маршрута.");
+  }
+}
+
+function exportRoute() {
+  if (segments.length === 0) return alert("Маршрут пуст.");
+  const data = {
+    name: `Маршрут от ${new Date().toLocaleString()}`,
+    distance: totalDistance(),
+    segments
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement("a");
@@ -277,9 +314,10 @@ function importRoute() {
       const data = JSON.parse(e.target.result);
       segments = data.segments || [];
       updateMap();
-      if (segments.length && segments[0].length) {
+      if (segments.length > 0 && segments[0].length > 0) {
         markStart(segments[0][0]);
-        markFinish();
+        const last = segments.flat().slice(-1)[0];
+        markFinish({ lat: last.lat, lon: last.lon });
       }
     } catch (err) {
       alert("Ошибка чтения JSON.");
@@ -293,11 +331,13 @@ function clearRoute() {
   stopTimer();
   segments = [];
   currentSegment = [];
-  routeLines.forEach(l => map.removeLayer(l));
-  routeLines = [];
+
+  if (routeLines) routeLines.forEach(line => map.removeLayer(line));
   if (liveMarker) map.removeLayer(liveMarker);
   if (startMarker) map.removeLayer(startMarker);
   if (finishMarker) map.removeLayer(finishMarker);
+
+  routeLines = [];
   liveMarker = null;
   startMarker = null;
   finishMarker = null;
@@ -305,8 +345,6 @@ function clearRoute() {
   document.getElementById("distance").textContent = "Дистанция: —";
   document.getElementById("pointsCount").textContent = "Точек: 0";
   document.getElementById("timer").textContent = "Время движения: 00:00:00";
-  document.getElementById("motionType").textContent = "Режим: ❓";
-  document.getElementById("currentAlt").textContent = "Высота: —";
 }
 
 function createStatusElement(text) {
