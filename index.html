@@ -3,21 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GPS Трекер маршрута</title>
+  <title>🧭 GPS Трекер маршрута</title>
 
-  <!-- Leaflet CDN -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    crossorigin=""
-  />
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    crossorigin=""
-  ></script>
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 
-  <link rel="stylesheet" href="style.css" />
+  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Стили -->
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="container">
@@ -42,15 +38,16 @@
       <p id="timer">Время движения: 00:00:00</p>
       <p id="motionType">Режим: ❓</p>
       <p id="currentAlt">Высота: —</p>
-      <p id="weatherInfo">Погода: -</p>
+      <p id="weatherInfo">Погода: —</p>
     </div>
 
     <hr>
-    <button onclick="drawElevationChart()">🔼 График высот</button>
+    <button onclick="fetchElevations()">🔼 Получить высоты</button>
     <canvas id="elevationChart" width="100%" height="200"></canvas>
     <hr>
-    <button onclick="drawTemperatureChart()">🌡️ График температуры</button>
-   <canvas id="temperatureChart" width="100%" height="200"></canvas>
+    <canvas id="temperatureChart" width="100%" height="200"></canvas>
+    <hr>
+    <canvas id="speedChart" width="100%" height="200"></canvas>
   </div>
 
   <script src="script.js"></script>
