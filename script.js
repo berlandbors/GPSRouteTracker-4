@@ -1,3 +1,4 @@
+
 // === Глобальные переменные ===
 let map;
 let segments = [];
@@ -16,7 +17,7 @@ let elevationChart = null;
 let temperatureChart = null;
 let speedChart = null;
 let windChart = null;
-let chartsInitialized = false;
+let distanceOverTimeChart = null;
 
 // === On Load ===
 window.onload = () => {
@@ -74,7 +75,7 @@ function startTracking() {
   const status = createStatusElement("⏳ Ожидание GPS...");
 
   watchId = navigator.geolocation.watchPosition(async pos => {
-    const { latitude, longitude, accuracy, altitude, speed } = pos.coords;
+    const { latitude, longitude, accuracy, speed } = pos.coords;
     if (accuracy > 15) {
       status.textContent = `⚠️ Точность ${accuracy.toFixed(1)} м — ожидание...`;
       return;
@@ -82,14 +83,21 @@ function startTracking() {
     status.remove();
 
     const coords = smoothCoords(latitude, longitude);
+    const elevation = await fetchElevation(coords.lat, coords.lon);
+    const weather = await fetchWeather(coords.lat, coords.lon);
+
+    const now = new Date();
+    const elapsed = startTime ? now - startTime : 0;
+
     const point = {
       lat: coords.lat,
       lon: coords.lon,
-      alt: altitude ?? null,
-      time: new Date().toISOString(),
-      speed: speed != null ? Math.round(speed * 60) : null, // м/мин
+      alt: elevation,
+      time: now.toISOString(),
+      seconds: Math.floor(elapsed / 1000),
+      speed: speed != null ? Math.round(speed * 60) : null,
       motion: speed == null ? "unknown" : (speed < 2 ? "walk" : "vehicle"),
-      weather: await fetchWeather(coords.lat, coords.lon)
+      weather: weather
     };
 
     if (currentSegment.length === 0) {
@@ -100,7 +108,7 @@ function startTracking() {
     if (shouldAddPoint(coords)) {
       currentSegment.push(point);
       updateMap();
-      drawAllCharts(); // динамическое обновление графиков
+      drawAllCharts();
     }
 
     updateLiveMarker(coords, point);
@@ -193,23 +201,9 @@ function updateMap() {
   document.getElementById("distance").textContent = `Дистанция: ${totalDistance().toFixed(2)} км`;
 }
 
-function markStart(coords) {
-  if (startMarker) map.removeLayer(startMarker);
-  startMarker = L.marker([coords.lat, coords.lon], {
-    icon: L.divIcon({ className: 'start-icon', html: "🟢", iconSize: [20, 20] })
-  }).addTo(map).bindPopup("🚩 Старт");
-}
+// === Расчёты и графики ===
+const toRad = deg => deg * Math.PI / 180;
 
-function markFinish() {
-  const last = segments.flat().at(-1);
-  if (!last) return;
-  if (finishMarker) map.removeLayer(finishMarker);
-  finishMarker = L.marker([last.lat, last.lon], {
-    icon: L.divIcon({ className: 'finish-icon', html: "🔴", iconSize: [20, 20] })
-  }).addTo(map).bindPopup("🏁 Финиш");
-}
-
-// === Расчёт расстояния ===
 function haversine(p1, p2) {
   const R = 6371;
   const dLat = toRad(p2.lat - p1.lat);
@@ -219,7 +213,6 @@ function haversine(p1, p2) {
             Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
-const toRad = deg => deg * Math.PI / 180;
 
 function totalDistance() {
   let dist = 0;
@@ -231,19 +224,23 @@ function totalDistance() {
   return dist;
 }
 
-// === Графики ===
 function drawAllCharts() {
   const all = segments.flat();
-  const labels = all.map((_, i) => `#${i + 1}`);
-
+  const labels = all.map(p => formatTime(p.seconds));
   const altitudes = all.map(p => p.alt ?? null);
   const temps = all.map(p => p.weather?.temp ?? null);
   const speeds = all.map(p => p.speed ?? null);
   const winds = all.map(p => p.weather?.wind ?? null);
 
+  let dist = 0;
+  const distanceOverTime = all.map((p, i) => {
+    if (i > 0) dist += haversine(all[i - 1], all[i]);
+    return dist.toFixed(2);
+  });
+
   const drawChart = (id, label, data, color) => {
     const ctx = document.getElementById(id);
-    const chart = new Chart(ctx, {
+    return new Chart(ctx, {
       type: 'line',
       data: {
         labels,
@@ -260,29 +257,37 @@ function drawAllCharts() {
         responsive: true,
         plugins: { legend: { display: false }},
         scales: {
-          x: { title: { display: true, text: "Точки" } },
+          x: { title: { display: true, text: "Время" } },
           y: { title: { display: true, text: label } }
         }
       }
     });
-    return chart;
   };
 
   if (elevationChart) elevationChart.destroy();
   if (temperatureChart) temperatureChart.destroy();
   if (speedChart) speedChart.destroy();
   if (windChart) windChart.destroy();
+  if (distanceOverTimeChart) distanceOverTimeChart.destroy();
 
   elevationChart = drawChart("elevationChart", "Высота (м)", altitudes, "green");
   temperatureChart = drawChart("temperatureChart", "Температура (°C)", temps, "orange");
   speedChart = drawChart("speedChart", "Скорость (м/мин)", speeds, "blue");
   windChart = drawChart("windChart", "Скорость ветра (км/ч)", winds, "purple");
+  distanceOverTimeChart = drawChart("distanceOverTimeChart", "Дистанция (км)", distanceOverTime, "brown");
 }
 
-// === Погода ===
+function formatTime(seconds) {
+  const h = String(Math.floor(seconds / 3600)).padStart(2, '0');
+  const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+  const s = String(seconds % 60).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+
+// === API запросы ===
 async function fetchWeather(lat, lon) {
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,wind_speed_10m,wind_direction_10m`;
   try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,wind_speed_10m,wind_direction_10m&current_weather=true`;
     const res = await fetch(url);
     const data = await res.json();
     const w = data.current;
@@ -291,6 +296,17 @@ async function fetchWeather(lat, lon) {
       wind: Math.round(w.wind_speed_10m),
       dir: degToDir(w.wind_direction_10m)
     };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchElevation(lat, lon) {
+  try {
+    const url = `https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lon}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return Math.round(data.elevation ?? 0);
   } catch {
     return null;
   }
@@ -361,6 +377,22 @@ function importRoute() {
   reader.readAsText(file);
 }
 
+function markStart(coords) {
+  if (startMarker) map.removeLayer(startMarker);
+  startMarker = L.marker([coords.lat, coords.lon], {
+    icon: L.divIcon({ className: 'start-icon', html: "🟢", iconSize: [20, 20] })
+  }).addTo(map).bindPopup("🚩 Старт");
+}
+
+function markFinish() {
+  const last = segments.flat().at(-1);
+  if (!last) return;
+  if (finishMarker) map.removeLayer(finishMarker);
+  finishMarker = L.marker([last.lat, last.lon], {
+    icon: L.divIcon({ className: 'finish-icon', html: "🔴", iconSize: [20, 20] })
+  }).addTo(map).bindPopup("🏁 Финиш");
+}
+
 // === Очистка ===
 function clearRoute() {
   stopTracking();
@@ -383,6 +415,7 @@ function clearRoute() {
   if (temperatureChart) temperatureChart.destroy();
   if (speedChart) speedChart.destroy();
   if (windChart) windChart.destroy();
+  if (distanceOverTimeChart) distanceOverTimeChart.destroy();
 }
 
 // === Вспомогательное ===
