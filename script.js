@@ -1,4 +1,3 @@
-
 // === Глобальные переменные ===
 let map;
 let segments = [];
@@ -43,7 +42,6 @@ function checkGPSAccess() {
     { enableHighAccuracy: true }
   );
 }
-
 // === Сглаживание координат ===
 function smoothCoords(lat, lon) {
   smoothingBuffer.push({ lat, lon });
@@ -85,7 +83,6 @@ function startTracking() {
     const coords = smoothCoords(latitude, longitude);
     const elevation = await fetchElevation(coords.lat, coords.lon);
     const weather = await fetchWeather(coords.lat, coords.lon);
-
     const now = new Date();
     const elapsed = startTime ? now - startTime : 0;
 
@@ -115,16 +112,17 @@ function startTracking() {
     map.panTo([coords.lat, coords.lon]);
     updateMotionDisplay(point.motion);
     document.getElementById("currentAlt").textContent = point.alt !== null ? `Высота: ${Math.round(point.alt)} м` : "Высота: —";
+    document.getElementById("weatherInfo").textContent =
+      weather ? `Погода: ${weather.temp}°C, ветер ${weather.wind} км/ч ${weather.dir}` : "Погода: —";
   }, err => {
     status.remove();
     alert("Ошибка GPS: " + err.message);
   }, {
     enableHighAccuracy: true,
     maximumAge: 0,
-    timeout: 5000
+    timeout: 30000
   });
 }
-
 function stopTracking() {
   if (watchId !== null) {
     navigator.geolocation.clearWatch(watchId);
@@ -132,7 +130,7 @@ function stopTracking() {
   }
 }
 
-// === Обновление UI ===
+// === Отображение маркеров и статуса ===
 function updateLiveMarker(coords, point) {
   const latlng = [coords.lat, coords.lon];
   const w = point.weather;
@@ -201,29 +199,6 @@ function updateMap() {
   document.getElementById("distance").textContent = `Дистанция: ${totalDistance().toFixed(2)} км`;
 }
 
-// === Расчёты и графики ===
-const toRad = deg => deg * Math.PI / 180;
-
-function haversine(p1, p2) {
-  const R = 6371;
-  const dLat = toRad(p2.lat - p1.lat);
-  const dLon = toRad(p2.lon - p1.lon);
-  const a = Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(p1.lat)) * Math.cos(toRad(p2.lat)) *
-            Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function totalDistance() {
-  let dist = 0;
-  segments.forEach(seg => {
-    for (let i = 0; i < seg.length - 1; i++) {
-      dist += haversine(seg[i], seg[i + 1]);
-    }
-  });
-  return dist;
-}
-
 function drawAllCharts() {
   const all = segments.flat();
   const labels = all.map(p => formatTime(p.seconds));
@@ -284,19 +259,42 @@ function formatTime(seconds) {
   return `${h}:${m}:${s}`;
 }
 
-// === API запросы ===
+function haversine(p1, p2) {
+  const R = 6371;
+  const dLat = toRad(p2.lat - p1.lat);
+  const dLon = toRad(p2.lon - p1.lon);
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(p1.lat)) * Math.cos(toRad(p2.lat)) *
+            Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+const toRad = deg => deg * Math.PI / 180;
+
+function totalDistance() {
+  let dist = 0;
+  segments.forEach(seg => {
+    for (let i = 0; i < seg.length - 1; i++) {
+      dist += haversine(seg[i], seg[i + 1]);
+    }
+  });
+  return dist;
+}
+
+// === API: погода и высота ===
 async function fetchWeather(lat, lon) {
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,wind_speed_10m,wind_direction_10m&current_weather=true`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`;
     const res = await fetch(url);
     const data = await res.json();
-    const w = data.current;
+    const w = data.current_weather;
     return {
-      temp: Math.round(w.temperature_2m),
-      wind: Math.round(w.wind_speed_10m),
-      dir: degToDir(w.wind_direction_10m)
+      temp: Math.round(w.temperature),
+      wind: Math.round(w.windspeed),
+      dir: degToDir(w.winddirection)
     };
-  } catch {
+  } catch (e) {
+    console.error("Ошибка запроса погоды:", e);
     return null;
   }
 }
@@ -317,7 +315,7 @@ function degToDir(deg) {
   return dirs[Math.round(deg / 45) % 8];
 }
 
-// === Хранилище ===
+// === Экспорт/Импорт/Очистка ===
 function saveRoute() {
   const data = {
     name: `Маршрут от ${new Date().toLocaleString()}`,
@@ -377,6 +375,7 @@ function importRoute() {
   reader.readAsText(file);
 }
 
+// === Метки старта и финиша ===
 function markStart(coords) {
   if (startMarker) map.removeLayer(startMarker);
   startMarker = L.marker([coords.lat, coords.lon], {
@@ -418,7 +417,7 @@ function clearRoute() {
   if (distanceOverTimeChart) distanceOverTimeChart.destroy();
 }
 
-// === Вспомогательное ===
+// === Статус элемент ===
 function createStatusElement(text) {
   const div = document.createElement("div");
   div.id = "gps-status";
