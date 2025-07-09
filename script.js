@@ -134,14 +134,19 @@ function stopTracking() {
 function updateLiveMarker(coords, point) {
   const latlng = [coords.lat, coords.lon];
   const w = point.weather;
+  
+  // Конвертация скорости в км/ч
+  const speedKmH = point.speed ? (point.speed * 60 / 1000).toFixed(2) : null; 
+
   const popupText = `
     📍 Вы здесь<br>
     Высота: ${point.alt !== null ? Math.round(point.alt) + ' м' : '—'}<br>
-    Скорость: ${point.speed ?? '—'} м/мин<br>
+    Скорость: ${point.speed ?? '—'} м/мин, ${speedKmH ?? '—'} км/ч<br>
     Темп: ${point.motion === "walk" ? "🚶" : "🚗"}<br>
     Температура: ${w?.temp ?? "—"}°C<br>
     Ветер: ${w?.wind ?? "—"} км/ч ${w?.dir ?? ""}
   `;
+  
   if (!liveMarker) {
     liveMarker = L.circleMarker(latlng, {
       radius: 8,
